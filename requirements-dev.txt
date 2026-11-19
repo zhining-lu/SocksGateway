@@ -1,0 +1,11 @@
+-r requirements.txt
+
+# 测试与静态检查
+pytest>=8
+ruff>=0.5
+
+# 开发辅助（图标生成、截图）
+pillow>=10
+
+# 打包 exe
+pyinstaller>=6

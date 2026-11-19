@@ -1,0 +1,4 @@
+# 运行依赖
+pywebview>=5.0
+
+# 开发/测试/打包依赖见 requirements-dev.txt
