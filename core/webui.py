@@ -17,6 +17,7 @@ ALLOWED = {
     "test_upstream", "test_gateway", "update_rule_list", "export_pac",
     "export_env_script", "open_folder", "set_winhttp", "set_user_env",
     "set_autostart", "quit_app", "log_js",
+    "pick_bat_file", "start_upstream",
 }
 
 CTYPES = {

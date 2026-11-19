@@ -50,6 +50,10 @@ DEFAULT_CONFIG = {
         "restore_on_exit": True,
         "bypass_extra": True,    # 把不代理列表同步写入 Windows 例外
     },
+    # 上游代理服务由外部程序提供，这里只记「用哪个脚本启动它」
+    "upstream_launcher": {
+        "bat_path": "",
+    },
     "autostart": False,
     "start_minimized": False,
     "auto_start_gateway": False,   # 打开程序即启动网关（配合开机自启）

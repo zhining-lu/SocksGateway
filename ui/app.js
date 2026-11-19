@@ -92,6 +92,7 @@
     $("#f-pass").value = C.upstream.password || "";
     $("#f-dns").checked = !!C.dns_via_proxy;
     $("#f-bypass").value = (C.bypass || []).join("\n");
+    $("#f-bat-path").value = (C.upstream_launcher || {}).bat_path || "";
     $("#hero-upstream").textContent = `${C.upstream.scheme}://${C.upstream.host}:${C.upstream.port}`;
   }
 
@@ -346,6 +347,37 @@
     $("#f-bypass").addEventListener("change", (e) => {
       C.bypass = e.target.value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
       saveCfg(true);
+    });
+
+    $("#f-bat-path").addEventListener("change", (e) => {
+      C.upstream_launcher = C.upstream_launcher || {};
+      C.upstream_launcher.bat_path = e.target.value.trim();
+      saveCfg(true);
+    });
+    $("#btn-bat-pick").addEventListener("click", async (e) => {
+      const btn = e.target;
+      btn.disabled = true; btn.textContent = "选择中…";
+      try {
+        const r = await call("pick_bat_file");
+        if (r.ok && r.path) {
+          C.upstream_launcher = C.upstream_launcher || {};
+          C.upstream_launcher.bat_path = r.path;
+          $("#f-bat-path").value = r.path;
+          saveCfg(true);
+        }
+      } finally {
+        btn.disabled = false; btn.textContent = "选择…";
+      }
+    });
+    $("#btn-up-start").addEventListener("click", async (e) => {
+      const btn = e.target;
+      btn.disabled = true; btn.textContent = "启动中…";
+      try {
+        const r = await call("start_upstream");
+        toast(r.message, r.ok ? "ok" : "err");
+      } finally {
+        btn.disabled = false; btn.textContent = "启动代理服务";
+      }
     });
   }
 

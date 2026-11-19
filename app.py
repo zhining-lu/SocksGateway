@@ -23,6 +23,7 @@ if BASE_DIR not in sys.path:
 from core import __version__ as APP_VERSION  # noqa: E402
 from core import config as cfgmod  # noqa: E402
 from core import gateway as gwmod  # noqa: E402
+from core import launcher as launchermod  # noqa: E402
 from core import pac as pacmod  # noqa: E402
 from core import rules as rulemod  # noqa: E402
 from core import (  # noqa: E402
@@ -253,6 +254,26 @@ class Api:
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "message": f"设置系统代理失败：{e}"}
 
+    # ---------------- 上游代理服务 ----------------
+    def pick_bat_file(self):
+        """弹出文件对话框选脚本；取消时返回空路径，不算错误。"""
+        path = launchermod.pick_script()
+        return {"ok": True, "path": path, "message": ""}
+
+    def start_upstream(self):
+        up = self.cfg.get("upstream") or {}
+        host = up.get("host") or "127.0.0.1"
+        try:
+            port = int(up.get("port") or 0)
+        except (TypeError, ValueError):
+            port = 0
+        if launchermod.port_open(host, port):
+            return {"ok": True, "message": f"上游已在运行（{host}:{port}），无需重复启动"}
+        conf = self.cfg.get("upstream_launcher") or {}
+        ok, msg = launchermod.run_script(conf.get("bat_path") or "")
+        log_event(f"启动代理服务：{msg}")
+        return {"ok": ok, "message": msg}
+
     def set_winhttp(self, enable: bool):
         if enable:
             ok, msg = sysproxy.set_winhttp("127.0.0.1", int(self.cfg["listen"]["port"]))
@@ -456,10 +477,23 @@ class RuleUpdater(threading.Thread):
         self._stop_evt.set()
 
 
+def _launch_upstream_on_boot(api: Api) -> None:
+    """每次启动都尝试拉起上游代理服务；没配脚本就静默跳过。
+
+    上游已经在跑时 start_upstream() 会自行识别并跳过，不会起第二份。
+    """
+    conf = api.cfg.get("upstream_launcher") or {}
+    if not (conf.get("bat_path") or "").strip():
+        return
+    res = api.start_upstream()
+    log_event(f"启动时拉起代理服务：{res.get('message')}")
+
+
 def _headless(core: Core, api: Api):
     print("=" * 56)
     print(f" {APP_TITLE} {APP_VERSION} — headless")
     print("=" * 56)
+    _launch_upstream_on_boot(api)
     res = api.start()
     print(res["message"])
     print(f" 上游: {core.cfg['upstream']['scheme']}://{core.cfg['upstream']['host']}:{core.cfg['upstream']['port']}")
@@ -566,6 +600,9 @@ def main():
     # 规则列表每天自动更新：独立线程，不影响窗口和网关
     updater = RuleUpdater(api)
     updater.start()
+
+    # 每次启动都把上游代理服务拉起来（脚本自己负责幂等）
+    _launch_upstream_on_boot(api)
 
     # 开机自启场景：窗口还没出来就把网关拉起来，避免前几秒无法上网
     if cfg.get("auto_start_gateway"):

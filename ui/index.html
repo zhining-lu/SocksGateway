@@ -197,6 +197,17 @@
               <span class="muted">域名交给上游解析（socks5h）。Firefox 系浏览器若启用 DoH 可自行调整。</span>
             </div>
           </div>
+          <div class="pad" style="border-top:1px solid var(--line-soft)">
+            <div class="field">
+              <label>代理服务启动脚本</label>
+              <div class="inline">
+                <input type="text" id="f-bat-path" spellcheck="false" placeholder="选择 .bat 或 .cmd，用它启动上游代理服务">
+                <button class="btn" id="btn-bat-pick">选择…</button>
+                <button class="btn primary" id="btn-up-start">启动代理服务</button>
+              </div>
+              <p class="hint">脚本在后台静默执行，不弹命令行窗口；由它负责监听上面的上游地址和端口。</p>
+            </div>
+          </div>
         </div>
 
         <details class="card details">
