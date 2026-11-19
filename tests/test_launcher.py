@@ -1,5 +1,6 @@
-"""代理服务启动脚本：路径校验、端口探测、启动分支。"""
+"""代理服务启动脚本：路径校验、启动分支、输出捕获。"""
 import socket
+import time
 
 import pytest
 
@@ -20,19 +21,6 @@ def free_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
-
-
-@pytest.fixture
-def listener():
-    """占一个真实监听端口，模拟「代理服务已经在跑」。"""
-    s = socket.socket()
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(("127.0.0.1", 0))
-    s.listen(1)
-    try:
-        yield s.getsockname()[1]
-    finally:
-        s.close()
 
 
 def make_api(port, bat_path=""):
@@ -101,27 +89,15 @@ def test_run_script_reports_spawn_failure(tmp_path, monkeypatch):
     assert not ok and "拒绝访问" in msg
 
 
-# ---------------- 端口探测 ----------------
-def test_port_open_true(listener):
-    assert launchermod.port_open("127.0.0.1", listener) is True
-
-
-def test_port_open_false():
-    assert launchermod.port_open("127.0.0.1", free_port()) is False
-
-
-def test_port_open_handles_zero_port():
-    assert launchermod.port_open("127.0.0.1", 0) is False
-
-
 # ---------------- 启动入口 ----------------
-def test_start_upstream_skips_when_port_already_open(listener, monkeypatch):
+def test_start_upstream_always_runs_script(monkeypatch):
+    """不再探测端口：即使上游已在跑，点按钮也照样执行脚本。"""
+    monkeypatch.setattr(appmod, "log_event", lambda *a, **k: None)
     called = []
     monkeypatch.setattr(launchermod, "run_script",
-                        lambda p: called.append(p) or (True, "x"))
-    res = make_api(listener, "C:\\tools\\up.bat").start_upstream()
-    assert res["ok"] and "已在运行" in res["message"]
-    assert called == []          # 不能重复起第二个实例
+                        lambda p: called.append(p) or (True, "启动脚本已执行"))
+    res = make_api(free_port(), "C:\\tools\\up.bat").start_upstream()
+    assert res["ok"] and called == ["C:\\tools\\up.bat"]
 
 
 def test_start_upstream_runs_selected_script(monkeypatch, tmp_path):
@@ -176,3 +152,49 @@ def test_boot_tolerates_start_failure(monkeypatch):
     monkeypatch.setattr(appmod, "log_event", lambda *a, **k: None)
     res = appmod._launch_upstream_on_boot(make_api(free_port(), "C:\\nope\\up.bat"))
     assert res is None
+
+
+# ---------------- 输出捕获 ----------------
+def test_output_log_keeps_only_recent_lines():
+    log = launchermod.OutputLog(max_lines=3)
+    for i in range(5):
+        log.add(f"line{i}")
+    assert log.snapshot() == ["line2", "line3", "line4"]
+
+
+def test_output_log_truncates_overlong_line():
+    log = launchermod.OutputLog()
+    log.add("x" * 5000)
+    assert len(log.snapshot()[0]) <= launchermod.MAX_LINE_LEN + 4
+
+
+def test_run_script_captures_stdout(tmp_path):
+    bat = tmp_path / "out.bat"
+    bat.write_text("@echo off\r\necho hello-from-bat\r\n")
+    launchermod.clear_output()
+    ok, _msg = launchermod.run_script(str(bat))
+    assert ok
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if any("hello-from-bat" in line for line in launchermod.read_output()):
+            break
+        time.sleep(0.05)
+    lines = launchermod.read_output()
+    assert lines[0].startswith("> ")                       # 第一条记录执行的脚本
+    assert any("hello-from-bat" in line for line in lines), lines
+
+
+def test_run_script_clears_previous_output(tmp_path):
+    bat = tmp_path / "out.bat"
+    bat.write_text("@echo off\r\necho second-run\r\n")
+    launchermod.clear_output()
+    launchermod._LOG.add("old-stale-line")
+    launchermod.run_script(str(bat))
+    lines = launchermod.read_output()
+    assert not any("old-stale-line" in line for line in lines)
+
+
+def test_api_script_output_returns_lines(monkeypatch):
+    monkeypatch.setattr(launchermod, "read_output", lambda: ["a", "b"])
+    res = make_api(free_port()).script_output()
+    assert res["ok"] is True and res["lines"] == ["a", "b"]

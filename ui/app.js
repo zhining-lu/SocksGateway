@@ -96,6 +96,18 @@
     $("#hero-upstream").textContent = `${C.upstream.scheme}://${C.upstream.host}:${C.upstream.port}`;
   }
 
+  async function refreshBatOut() {
+    const pre = $("#bat-out");
+    const r = await call("script_output");
+    const lines = (r && r.lines) || [];
+    if (!lines.length) return;                       // 没执行过就保持隐藏
+    const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+    const text = lines.join("\n");
+    if (pre.textContent !== text) pre.textContent = text;
+    pre.hidden = false;
+    if (atBottom) pre.scrollTop = pre.scrollHeight;   // 用户没往上翻时才自动贴底
+  }
+
   function renderRules() {
     const body = $("#rules-body");
     if (!C.rules || !C.rules.length) {
@@ -252,6 +264,7 @@
       C = st.config;
       sysApplied = !!st.system_proxy.applied;
       renderServer();
+      refreshBatOut().catch(() => {});   // 启动时自动拉起过脚本的话，这里能显示输出
       renderRules();
       renderRuleList();
       renderSystem(st.system_proxy);
@@ -294,6 +307,8 @@
           renderSystem(full.system_proxy);
         }
       }
+      // 输出面板展开时跟着脚本持续刷新
+      if (!$("#bat-out").hidden && tick % 3 === 0) refreshBatOut();
     }, 1000);
   }
 
@@ -372,12 +387,15 @@
     $("#btn-up-start").addEventListener("click", async (e) => {
       const btn = e.target;
       btn.disabled = true; btn.textContent = "启动中…";
+      let started = false;
       try {
         const r = await call("start_upstream");
+        started = !!r.ok;
         toast(r.message, r.ok ? "ok" : "err");
       } finally {
         btn.disabled = false; btn.textContent = "启动代理服务";
       }
+      if (started) refreshBatOut();      // 启动成功后自动展开脚本输出
     });
   }
 

@@ -6,12 +6,50 @@ v2ray / SSH 隧道由用户自己决定。
 from __future__ import annotations
 
 import os
-import socket
 import subprocess
+import threading
+from collections import deque
 
 CREATE_NO_WINDOW = 0x08000000
 _ALLOWED_EXT = (".bat", ".cmd")
-_DETACHED = (subprocess.DEVNULL, subprocess.DEVNULL, subprocess.DEVNULL)
+_DEVNULL = subprocess.DEVNULL
+MAX_LINES = 400          # 输出只保留最近这么多行
+MAX_LINE_LEN = 2000      # 单行过长时截断，防止极端输出撑爆内存
+
+
+class OutputLog:
+    """脚本输出的环形缓冲。"""
+
+    def __init__(self, max_lines: int = MAX_LINES):
+        self._lines: deque[str] = deque(maxlen=max_lines)
+        self._lock = threading.Lock()
+
+    def clear(self) -> None:
+        with self._lock:
+            self._lines.clear()
+
+    def add(self, text: str) -> None:
+        line = (text or "").rstrip()
+        if len(line) > MAX_LINE_LEN:
+            line = line[:MAX_LINE_LEN] + " …"
+        with self._lock:
+            self._lines.append(line)
+
+    def snapshot(self) -> list[str]:
+        with self._lock:
+            return list(self._lines)
+
+
+_LOG = OutputLog()
+
+
+def read_output() -> list[str]:
+    """最近一次启动脚本的输出（含命令行和退出码）。"""
+    return _LOG.snapshot()
+
+
+def clear_output() -> None:
+    _LOG.clear()
 
 
 def valid_script(path: str) -> bool:
@@ -19,15 +57,32 @@ def valid_script(path: str) -> bool:
     return bool(path) and path.lower().endswith(_ALLOWED_EXT)
 
 
-def port_open(host: str, port: int, timeout: float = 0.3) -> bool:
-    """上游端口是否已经可连，用来避免重复启动。"""
-    if not port:
-        return False
+def _pump(proc) -> None:
+    """把脚本的 stdout/stderr 读进缓冲。
+
+    注意：bat 里如果用 `start xxx.exe` 拉起真正的服务，cmd 会很快退出，
+    这里只能拿到 cmd 自己那几行；服务自身的日志得由脚本重定向到文件。
+    """
+    stream = getattr(proc, "stdout", None)
+    if stream is None:
+        return
     try:
-        with socket.create_connection((host, int(port)), timeout=timeout):
-            return True
+        for raw in iter(stream.readline, b""):
+            _LOG.add(raw.decode("mbcs", "replace"))
     except (OSError, ValueError):
-        return False
+        pass
+    finally:
+        try:
+            stream.close()
+        except OSError:
+            pass
+        try:
+            # 流关闭时进程可能还没完全退出，poll() 会拿到 None，稍等一下更准
+            code = proc.wait(timeout=2)
+        except (subprocess.TimeoutExpired, OSError):
+            code = None
+        if code is not None:
+            _LOG.add(f"[脚本已退出，返回码 {code}]")
 
 
 def run_script(path: str) -> tuple[bool, str]:
@@ -40,14 +95,20 @@ def run_script(path: str) -> tuple[bool, str]:
     if not os.path.isfile(bat):
         return False, f"找不到启动脚本：{bat}"
     try:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             ["cmd", "/c", bat],
             cwd=os.path.dirname(bat) or None,   # 脚本里常写相对路径
-            stdin=_DETACHED[0], stdout=_DETACHED[1], stderr=_DETACHED[2],
+            stdin=_DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=0,
             creationflags=CREATE_NO_WINDOW,
         )
     except OSError as e:
         return False, f"启动失败：{e}"
+    clear_output()
+    _LOG.add(f"> {bat}")
+    threading.Thread(target=_pump, args=(proc,), daemon=True).start()
     return True, "启动脚本已执行"
 
 

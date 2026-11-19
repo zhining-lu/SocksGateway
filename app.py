@@ -260,15 +260,12 @@ class Api:
         path = launchermod.pick_script()
         return {"ok": True, "path": path, "message": ""}
 
+    def script_output(self):
+        """最近一次启动脚本的输出，供界面查看。"""
+        return {"ok": True, "lines": launchermod.read_output()}
+
     def start_upstream(self):
-        up = self.cfg.get("upstream") or {}
-        host = up.get("host") or "127.0.0.1"
-        try:
-            port = int(up.get("port") or 0)
-        except (TypeError, ValueError):
-            port = 0
-        if launchermod.port_open(host, port):
-            return {"ok": True, "message": f"上游已在运行（{host}:{port}），无需重复启动"}
+        """执行启动脚本，不做端口探测——脚本是否幂等由用户自己决定。"""
         conf = self.cfg.get("upstream_launcher") or {}
         ok, msg = launchermod.run_script(conf.get("bat_path") or "")
         log_event(f"启动代理服务：{msg}")
@@ -478,9 +475,9 @@ class RuleUpdater(threading.Thread):
 
 
 def _launch_upstream_on_boot(api: Api) -> None:
-    """每次启动都尝试拉起上游代理服务；没配脚本就静默跳过。
+    """每次启动都执行一次启动脚本；没配脚本就静默跳过。
 
-    上游已经在跑时 start_upstream() 会自行识别并跳过，不会起第二份。
+    不做端口探测，也不管脚本是否幂等——那是脚本自己的事。
     """
     conf = api.cfg.get("upstream_launcher") or {}
     if not (conf.get("bat_path") or "").strip():
