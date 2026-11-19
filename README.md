@@ -157,3 +157,24 @@ python tools/serve.py     # 打印带令牌的 http://127.0.0.1:xxxxx/?t=...
 ```bash
 SocksGateway.exe --headless
 ```
+
+## 版本管理
+
+仓库已初始化（`main` 分支，首个提交打 `v1.0.0` 标签），换行统一为仓库内 LF、`.bat` 检出 CRLF。
+
+```bash
+git status                  # 看改动
+git log --oneline --graph   # 看历史
+git diff                    # 看具体差异
+git tag -a v1.1.0 -m "说明" # 打版本
+```
+
+已忽略：`.venv/`、`dist/`、`build/`、缓存、`.idea/workspace.xml`、`.workbuddy/`。
+`dist/SocksGateway.exe` 是构建产物默认不入库；若确实想把 exe 放进历史，用 `git add -f dist/SocksGateway.exe`。
+
+接远端：
+
+```bash
+git remote add origin <仓库地址>
+git push -u origin main --tags
+```
