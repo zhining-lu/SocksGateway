@@ -125,19 +125,25 @@
     $("#f-default").value = C.default_action || "proxy";
   }
 
+  // 正文预览上限，仅用于挡住极端大的列表（正常 gfwlist 约 4~5 千条，全部渲染）
+  const PREVIEW_MAX = 20000;
+
   function renderRuleList() {
     const rl = C.rule_list || {};
+    const rules = rl.rules || [];
     $("#f-rl-enabled").checked = !!rl.enabled;
     $("#f-rl-url").value = rl.url || "";
     $$('input[name="rlfmt"]').forEach((el) => { el.checked = (el.value === (rl.format || "gfwlist")); });
-    $("#rl-count").textContent = String(rl.count || 0);
+    $("#rl-count").textContent = String(rl.count || rules.length || 0);
     $("#rl-time").textContent = rl.last_update || "尚未更新";
-    const rules = rl.rules || [];
     $("#rl-sample").textContent = rules.length
       ? rules.slice(0, 3).map((r) => r.value).join("、") + (rules.length > 3 ? " …" : "")
       : "—";
+    $("#rl-preview-count").textContent = rules.length ? `共 ${rules.length} 条` : "—";
+    const shown = rules.length > PREVIEW_MAX ? rules.slice(0, PREVIEW_MAX) : rules;
     $("#rl-preview").textContent = rules.length
-      ? rules.slice(0, 120).map((r) => `${r.action === "direct" ? "@@ " : ""}${r.value}`).join("\n")
+      ? shown.map((r) => `${r.action === "direct" ? "@@ " : ""}${r.value}`).join("\n")
+        + (rules.length > PREVIEW_MAX ? `\n… 仅预览前 ${PREVIEW_MAX} 条，共 ${rules.length} 条` : "")
       : "尚未下载规则列表。";
   }
 
