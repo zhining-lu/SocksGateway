@@ -16,6 +16,7 @@
 
   const PAGE_META = {
     overview: ["概览", "本地 SOCKS5h 网关运行状态与实时流量"],
+    requests: ["最近请求", "实时查看网关转发的每一条连接"],
     server: ["代理服务器", "上游 SOCKS5 地址、网关监听与不代理列表"],
     switch: ["切换规则", "按域名决定走代理还是直连"],
     rulelist: ["规则列表", "订阅 AutoProxy / gfwlist 规则并自动分流"],

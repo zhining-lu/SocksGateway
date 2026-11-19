@@ -304,6 +304,16 @@ input[type="checkbox"].plain, .checkbox-line input { accent-color: var(--brand);
 .log-wrap td { font-size: 12.5px; }
 .log-wrap .host { font-variant-numeric: tabular-nums; }
 .log-wrap .route { font-size: 11.5px; }
+/* 最近请求独立页：整页撑满剩余高度，只有表格内部滚动，页面本身不出现竖向滚动条 */
+#page-requests { height: 100%; }
+#page-requests.active { display: flex; flex-direction: column; }
+#page-requests > .card {
+  flex: 1; min-height: 0; margin-bottom: 0;
+  display: flex; flex-direction: column;
+}
+#page-requests .card-head { flex: 0 0 auto; }
+#page-requests .log-wrap { flex: 1; min-height: 0; height: auto; max-height: none; }
+#page-requests .log-wrap thead th { position: sticky; top: 0; z-index: 1; }
 .tag { display: inline-block; padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 600; }
 .tag.proxy { background: var(--brand-soft); color: var(--brand-dark); }
 .tag.direct { background: #f0f2f6; color: #556070; }
