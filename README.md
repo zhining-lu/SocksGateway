@@ -24,7 +24,7 @@ Windows 的「系统代理」只认 HTTP 代理，不认 SOCKS；而 `socks=host
 3. 拨动 **接管系统代理**（或直接点「启动网关」时已按设置自动接管）；
 4. 打开浏览器访问任意网站验证；在「概览 → 最近请求」能看到实时连接。
 
-不需要管理员权限：只写 `HKCU` 注册表。
+不需要管理员权限：只改当前用户的 WinINET 代理（`HKCU` 范围）。
 
 ## 用 IDE 打开（IntelliJ IDEA / PyCharm）
 
@@ -75,18 +75,27 @@ Windows 的「系统代理」只认 HTTP 代理，不认 SOCKS；而 `socks=host
 
 ## 它到底改了什么
 
-接管时写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`：
+接管走 `InternetSetOption(INTERNET_OPTION_PER_CONNECTION_OPTION)`，由 Windows 一次性同步
+三处状态（而不是只写注册表）：
 
 ```
-ProxyEnable   = 1
+ProxyEnable   = 1                                    # HKCU\...\Internet Settings
 ProxyServer   = http=127.0.0.1:18081;https=127.0.0.1:18081
 ProxyOverride = <不代理列表> + 你原有的例外项（合并保留）
+AutoConfigURL = 清空（PAC 的优先级高于手动代理）
 ```
 
-然后调用 `InternetSetOption` 并广播 `WM_SETTINGCHANGE`，让已打开的应用立即重读。
+同时更新的还有 `Connections\DefaultConnectionSettings`（Internet 选项对话框的显示来源），
+并向所有顶层窗口广播 `WM_SETTINGCHANGE`，让已打开的应用立即重读。
 
-- 接管前的原始值会备份到配置文件里，点「还原 / 关闭」、点「停止网关」或在窗口关闭时（默认开启）都会精确还原；
-- 如果程序被强杀，系统代理会停留在网关地址上——重新打开程序并关闭系统代理即可，或手动把 `ProxyEnable` 置 0。
+为什么不再直接写注册表：直写能改到实际生效值，但对话框仍显示旧配置，用户点一下「确定」
+就会按旧值写回去；已经在跑的浏览器也不会重读，看起来像"设置没生效"或"自己掉了"。
+
+- 接管前的原始配置（flags / 代理串 / 例外 / PAC）备份到配置文件里，点「还原 / 关闭」、点「停止网关」或在窗口关闭时（默认开启）都会精确还原；
+- 例外项里的 IPv6 会自动规范成 `[::1]` 形式——WinINET 的 API 不接受裸 `::1`（注册表则照收）；
+- 备份兼容旧版本的注册表格式，升级后仍能正确还原；
+- 如果程序被强杀，系统代理会停留在网关地址上——重新打开程序并关闭系统代理即可，或手动把 `ProxyEnable` 置 0；
+- 上述情况下再次接管不会把「网关地址」存成备份：已有备份就沿用，没有备份则按「直连」记录，不会出现关闭代理后仍卡在网关上的情况。
 
 ## 覆盖范围（重要）
 
@@ -117,7 +126,7 @@ curl -x http://127.0.0.1:18081 https://www.gstatic.com/generate_204 -o NUL -w "%
 ## 文件与路径
 
 - 配置：`%APPDATA%\SocksGateway\config.json`
-- 代理备份：`%APPDATA%\SocksGateway\proxy-backup.json`（接管前的原始注册表值，配置被删也能还原）
+- 代理备份：`%APPDATA%\SocksGateway\proxy-backup.json`（接管前的原始代理配置，配置被删也能还原）
 - 日志：`%APPDATA%\SocksGateway\app.log`（窗口模式无控制台，排障看这里）
 - 导出：`socks-gateway.pac`、`enable-proxy.bat`
 
@@ -128,7 +137,7 @@ core/__init__.py       包元信息（版本号唯一来源）
 core/socks5.py         asyncio SOCKS5 客户端（socks5h / 用户名密码）
 core/gateway.py        HTTP 代理前端：CONNECT 隧道、HTTP 转发、路由判定、统计
 core/rules.py          不代理列表、通配符/正则规则、gfwlist 解析
-core/sysproxy.py       WinINET 注册表接管与还原、WinHTTP、用户环境变量
+core/sysproxy.py       WinINET 代理接管与还原、WinHTTP、用户环境变量
 core/pac.py            PAC 生成
 core/webui.py          本地界面服务（静态文件 + 带令牌的 JSON API）
 core/config.py         配置读写（%APPDATA%\SocksGateway\config.json）

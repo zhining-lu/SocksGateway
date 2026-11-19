@@ -210,6 +210,32 @@ class Api:
         log_event("系统代理已还原")
         return True
 
+    def _guard_backup(self, backup: dict) -> dict:
+        """校正这次读到的"原始配置"，避免把网关地址当成用户原设置。
+
+        如果当前代理已经指向本机网关，说明上一次接管没能正常还原（崩溃 / 强杀 /
+        上次运行时被手动关掉），此时读到的值不是用户原本的配置：
+          - 已经有备份  → 沿用旧备份，不要用网关地址覆盖它；
+          - 没有备份    → 退化为「直连」，否则关闭代理后会还原成网关地址、再也关不掉。
+        """
+        host, port = "127.0.0.1", int(self.cfg["listen"]["port"])
+        if not sysproxy.points_to(backup.get("proxy", ""), host, port):
+            return backup
+
+        existing = self._load_backup()
+        if existing:
+            old = sysproxy.normalize_backup(existing)
+            if not sysproxy.points_to(old["proxy"], host, port):
+                log_event("当前代理已指向网关且存在历史备份，沿用历史备份")
+                return old
+        log_event("当前代理已指向网关但无可用备份，按「直连」记录原状态")
+        return {
+            "flags": sysproxy.PROXY_TYPE_DIRECT,
+            "proxy": "",
+            "bypass": backup.get("bypass", ""),
+            "pac": "",
+        }
+
     def apply_system_proxy(self, enable: bool):
         try:
             if enable:
@@ -219,7 +245,7 @@ class Api:
                 backup = sysproxy.apply_http_proxy(
                     "127.0.0.1", int(self.cfg["listen"]["port"]), bypass)
                 if backup:
-                    self._save_backup(backup)
+                    self._save_backup(self._guard_backup(backup))
                 return {"ok": True, "message": "系统代理已指向本机网关"}
             self._restore_proxy()
             return {"ok": True, "message": "已关闭系统代理"}

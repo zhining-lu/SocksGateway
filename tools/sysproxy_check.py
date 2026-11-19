@@ -12,7 +12,9 @@ from core import gateway as gwmod
 from core import sysproxy
 
 before = sysproxy.read_current()
+before_conn = sysproxy.read_conn()
 print("原始:", json.dumps(before, ensure_ascii=False), flush=True)
+print("原始 WinINET:", json.dumps(before_conn, ensure_ascii=False)[:200], flush=True)
 
 cfg = cfgmod._deep_merge(cfgmod.DEFAULT_CONFIG, {
     "listen": {"port": 18081},
@@ -25,7 +27,9 @@ gw = gwmod.Gateway(cfg)
 asyncio.run_coroutine_threadsafe(gw.start(), loop).result(5)
 
 backup = sysproxy.apply_http_proxy("127.0.0.1", 18081, cfg["bypass"])
+print("备份:", json.dumps(backup, ensure_ascii=False)[:200], flush=True)
 print("接管后:", json.dumps(sysproxy.read_current(), ensure_ascii=False), flush=True)
+print("接管后 WinINET:", json.dumps(sysproxy.read_conn(), ensure_ascii=False)[:200], flush=True)
 print("is_enabled:", sysproxy.is_enabled(), "| 请在 30 秒内用默认代理访问网络", flush=True)
 
 for i in range(30):
@@ -35,8 +39,11 @@ for i in range(30):
 
 sysproxy.disable(backup)
 restored = sysproxy.read_current()
+restored_conn = sysproxy.read_conn()
 keys = ("ProxyEnable", "ProxyServer", "ProxyOverride", "AutoConfigURL")
 print("还原后:", json.dumps(restored, ensure_ascii=False), flush=True)
-print("还原一致:", {k: before.get(k) for k in keys} == {k: restored.get(k) for k in keys}, flush=True)
+print("还原一致(注册表):",
+      {k: before.get(k) for k in keys} == {k: restored.get(k) for k in keys}, flush=True)
+print("还原一致(WinINET):", before_conn == restored_conn, flush=True)
 print("最终流量:", json.dumps(gw.snapshot()["stats"], ensure_ascii=False), flush=True)
 asyncio.run_coroutine_threadsafe(gw.stop(), loop).result(5)
