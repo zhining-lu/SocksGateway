@@ -26,6 +26,7 @@ from core import gateway as gwmod  # noqa: E402
 from core import pac as pacmod  # noqa: E402
 from core import rules as rulemod  # noqa: E402
 from core import (  # noqa: E402
+    rulesync,
     socks5,
     sysproxy,
     webui,
@@ -338,12 +339,26 @@ class Api:
         keep_proxy = [r for r in parsed if r["action"] == "proxy"]
         keep_direct = [r for r in parsed if r["action"] == "direct"]
         merged = keep_proxy + keep_direct
-        rl["rules"] = merged
-        rl["count"] = len(merged)
-        rl["last_update"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        self.cfg["rule_list"] = rl
+        # 整体替换而不是就地改字段：后台自动更新与 UI 线程并发读时不会看到半成品
+        updated = dict(rl)
+        updated["rules"] = merged
+        updated["count"] = len(merged)
+        updated["last_update"] = rulesync.format_now()
+        self.cfg["rule_list"] = updated
         cfgmod.save(self.cfg)
-        return {"ok": True, "message": f"已更新 {len(merged)} 条规则（{rl['last_update']}）"}
+        return {"ok": True, "message": f"已更新 {len(merged)} 条规则（{updated['last_update']}）"}
+
+    def auto_update_rule_list(self):
+        """后台定时调用：没填网址、未到期都直接跳过，不产生请求。"""
+        rl = self.cfg.get("rule_list") or {}
+        if not (rl.get("url") or "").strip():
+            return None
+        interval = rulesync.normalize_interval(rl.get("update_interval_hours"))
+        if not rulesync.is_due(rl.get("last_update"), interval):
+            return None
+        res = self.update_rule_list()
+        log_event(f"规则列表自动更新：{res.get('message')}")
+        return res
 
     def _fetch(self, url: str):
         req = urllib.request.Request(url, headers={"User-Agent": "SocksGateway/1.0"})
@@ -415,6 +430,32 @@ class Api:
         return {"ok": True}
 
 
+class RuleUpdater(threading.Thread):
+    """规则列表定时更新。
+
+    每 check_seconds 醒一次（默认 30 分钟），只有距上次更新超过配置间隔才真正
+    发起下载，所以「每天一次」的精度是 ±30 分钟，不会产生多余的请求。
+    下载走独立线程，不占网关的 asyncio 事件循环。
+    """
+
+    def __init__(self, api, check_seconds: int = 1800):
+        super().__init__(name="rule-updater", daemon=True)
+        self._api = api
+        self._check = max(60, int(check_seconds))
+        self._stop_evt = threading.Event()
+
+    def run(self):
+        while not self._stop_evt.is_set():
+            try:
+                self._api.auto_update_rule_list()
+            except Exception as e:  # noqa: BLE001
+                log_event(f"规则列表自动更新异常：{e}")
+            self._stop_evt.wait(self._check)
+
+    def stop(self):
+        self._stop_evt.set()
+
+
 def _headless(core: Core, api: Api):
     print("=" * 56)
     print(f" {APP_TITLE} {APP_VERSION} — headless")
@@ -424,12 +465,15 @@ def _headless(core: Core, api: Api):
     print(f" 上游: {core.cfg['upstream']['scheme']}://{core.cfg['upstream']['host']}:{core.cfg['upstream']['port']}")
     print(f" 网关: http://127.0.0.1:{core.cfg['listen']['port']}")
     print(" Ctrl+C 停止")
+    updater = RuleUpdater(api)
+    updater.start()
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:
+        updater.stop()
         if api.cfg.get("backup"):
             api.apply_system_proxy(False)
         core.shutdown()
@@ -519,6 +563,10 @@ def main():
         print("或用 --headless 以无界面方式启动。")
         return
 
+    # 规则列表每天自动更新：独立线程，不影响窗口和网关
+    updater = RuleUpdater(api)
+    updater.start()
+
     # 开机自启场景：窗口还没出来就把网关拉起来，避免前几秒无法上网
     if cfg.get("auto_start_gateway"):
         try:
@@ -561,12 +609,15 @@ def main():
         return True
 
     window.events.closing += on_closing
-    _run_webview(window, api, cfg, core, url)
     try:
-        core.shutdown()
-    except Exception:
-        pass
-    ui_server.stop()
+        _run_webview(window, api, cfg, core, url)
+    finally:
+        updater.stop()
+        try:
+            core.shutdown()
+        except Exception:
+            pass
+        ui_server.stop()
 
 
 if __name__ == "__main__":

@@ -64,10 +64,11 @@ Windows 的「系统代理」只认 HTTP 代理，不认 SOCKS；而 `socks=host
 
 | 页面 | 作用 |
 | --- | --- |
-| 概览 | 运行状态、实时上下行速率、并发连接、最近请求日志、连通性自检 |
+| 概览 | 运行状态、实时上下行速率、并发连接、连通性自检 |
+| 最近请求 | 实时连接明细：时间、目标、路由（代理/直连）、状态、上下行、耗时 |
 | 代理服务器 | 上游协议/地址/端口、认证、本地监听端口、不代理的地址列表 |
 | 切换规则 | 按域名（域名 / 通配符 / 正则）决定「通过代理」还是「直接连接」 |
-| 规则列表 | 订阅 AutoProxy / gfwlist 列表（`||domain` 走代理，`@@||domain` 直连） |
+| 规则列表 | 订阅 AutoProxy / gfwlist 列表（`||domain` 走代理，`@@||domain` 直连），默认每天自动更新一次 |
 | 系统代理 | 查看当前注册表代理项、接管/还原、WinHTTP、命令行环境变量、PAC 导出 |
 
 默认已在「不代理的地址列表」里放好回环与内网网段（`127.*`、`10.*`、`172.16-31.*`、`192.168.*`、`*.local`），
@@ -137,6 +138,7 @@ core/__init__.py       包元信息（版本号唯一来源）
 core/socks5.py         asyncio SOCKS5 客户端（socks5h / 用户名密码）
 core/gateway.py        HTTP 代理前端：CONNECT 隧道、HTTP 转发、路由判定、统计
 core/rules.py          不代理列表、通配符/正则规则、gfwlist 解析
+core/rulesync.py       规则列表自动更新：到期判定（纯函数，可单测）
 core/sysproxy.py       WinINET 代理接管与还原、WinHTTP、用户环境变量
 core/pac.py            PAC 生成
 core/webui.py          本地界面服务（静态文件 + 带令牌的 JSON API）

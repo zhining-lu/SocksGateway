@@ -39,6 +39,7 @@ DEFAULT_CONFIG = {
         "url": "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt",
         "format": "gfwlist",     # gfwlist | autoproxy(同 gfwlist) | 纯文本域名
         "enabled": False,
+        "update_interval_hours": 24,   # 自动更新间隔（小时），下限 1
         "last_update": None,
         "count": 0,
         "rules": [],

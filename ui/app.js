@@ -129,6 +129,18 @@
   // 正文预览上限，仅用于挡住极端大的列表（正常 gfwlist 约 4~5 千条，全部渲染）
   const PREVIEW_MAX = 20000;
 
+  function fmtNextUpdate(rl) {
+    const last = String(rl.last_update || "");
+    if (!last) return "启动后检查";
+    const t = new Date(last.replace(" ", "T"));
+    if (isNaN(t.getTime())) return "—";
+    const hours = Number(rl.update_interval_hours) >= 1 ? Number(rl.update_interval_hours) : 24;
+    const next = new Date(t.getTime() + hours * 3600 * 1000);
+    if (next.getTime() <= Date.now()) return "即将更新";
+    const pad = (x) => String(x).padStart(2, "0");
+    return `${pad(next.getMonth() + 1)}-${pad(next.getDate())} ${pad(next.getHours())}:${pad(next.getMinutes())}`;
+  }
+
   function renderRuleList() {
     const rl = C.rule_list || {};
     const rules = rl.rules || [];
@@ -137,6 +149,7 @@
     $$('input[name="rlfmt"]').forEach((el) => { el.checked = (el.value === (rl.format || "gfwlist")); });
     $("#rl-count").textContent = String(rl.count || rules.length || 0);
     $("#rl-time").textContent = rl.last_update || "尚未更新";
+    $("#rl-next").textContent = fmtNextUpdate(rl);
     $("#rl-sample").textContent = rules.length
       ? rules.slice(0, 3).map((r) => r.value).join("、") + (rules.length > 3 ? " …" : "")
       : "—";
