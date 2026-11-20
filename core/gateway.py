@@ -16,6 +16,9 @@ from . import rules as rulemod
 from . import socks5
 
 MAX_HEAD = 64 * 1024
+# 转发块大小。每块要走一次事件循环（读、写、drain），实测块越大往返次数越少、
+# 吞吐越高；128 KB 之后收益基本饱和（再大只是多占内存），故定在这里。
+CHUNK = 128 * 1024
 
 
 def _now() -> float:
@@ -239,7 +242,7 @@ class Gateway:
             async def run():
                 try:
                     while True:
-                        data = await src.read(65536)
+                        data = await src.read(CHUNK)
                         if not data:
                             break
                         dst.write(data)
