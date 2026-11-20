@@ -181,13 +181,17 @@ def _set_options(flags=_UNSET, proxy=_UNSET, bypass=_UNSET, pac=_UNSET) -> None:
     _ = keep  # 显式引用，避免被优化掉
 
 
-def refresh() -> None:
-    """通知系统与各应用重读代理设置。官方 API 已广播一次，这里补发确保兼容。"""
-    try:
-        _wininet.InternetSetOptionW(None, INTERNET_OPTION_SETTINGS_CHANGED, None, 0)
-        _wininet.InternetSetOptionW(None, INTERNET_OPTION_REFRESH, None, 0)
-    except Exception:
-        pass
+WM_SETTINGCHANGE = 0x001A
+SMTO_ABORTIFHUNG = 0x0002
+
+
+def _broadcast(arg: str) -> None:
+    """向所有顶层窗口广播 WM_SETTINGCHANGE，arg 为发生变更的注册表子树。
+
+    系统代理要传 INTERNET_SETTINGS，环境变量必须传 "Environment"。
+    广播错了资源管理器不会重读 HKCU\\Environment，它派生出来的新终端
+    仍然继承旧的环境块，看起来就像「写了但没生效」。
+    """
     try:
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         user32.SendMessageTimeoutW.argtypes = [
@@ -196,9 +200,25 @@ def refresh() -> None:
         user32.SendMessageTimeoutW.restype = ctypes.c_size_t
         res = ctypes.c_size_t()
         user32.SendMessageTimeoutW(
-            0xFFFF, 0x001A, 0, INTERNET_SETTINGS, 0x0002, 800, ctypes.byref(res))
+            0xFFFF, WM_SETTINGCHANGE, 0, arg, SMTO_ABORTIFHUNG, 800,
+            ctypes.byref(res))
     except Exception:
         pass
+
+
+def refresh() -> None:
+    """通知系统与各应用重读代理设置。官方 API 已广播一次，这里补发确保兼容。"""
+    try:
+        _wininet.InternetSetOptionW(None, INTERNET_OPTION_SETTINGS_CHANGED, None, 0)
+        _wininet.InternetSetOptionW(None, INTERNET_OPTION_REFRESH, None, 0)
+    except Exception:
+        pass
+    _broadcast(INTERNET_SETTINGS)
+
+
+def refresh_env() -> None:
+    """通知系统用户环境变量已变更（与系统代理是两条独立通知）。"""
+    _broadcast("Environment")
 
 
 # ---------------- 应用 / 还原 ----------------
@@ -375,40 +395,54 @@ def clear_winhttp() -> tuple[bool, str]:
         return False, "netsh 执行失败"
 
 
-def set_user_env(host: str, port: int, enable: bool) -> None:
-    """为命令行工具（git / npm / pip 等）写入用户环境变量。"""
-    keys = {
-        "HTTP_PROXY": f"http://{host}:{port}",
-        "HTTPS_PROXY": f"http://{host}:{port}",
-        "ALL_PROXY": f"socks5h://{host}:{port}",
+def env_values(host: str, port: int) -> dict[str, str]:
+    """命令行工具（git / npm / pip / cargo 等）使用的代理环境变量。
+
+    ALL_PROXY 同样只能给 http://：网关（core/gateway.py）只实现了 HTTP 与
+    CONNECT，没有 SOCKS5 握手应答。写成 socks5h://{host}:{port} 时，只认
+    ALL_PROXY 的工具（cargo、go 等）能连上端口，却会一直等握手直到超时。
+    集中在这里生成，避免 set_user_env 与 env_script 两处再次写歪。
+    """
+    url = f"http://{host}:{port}"
+    return {
+        "HTTP_PROXY": url,
+        "HTTPS_PROXY": url,
+        "ALL_PROXY": url,
         "NO_PROXY": "localhost,127.0.0.1,::1",
     }
+
+
+def set_user_env(host: str, port: int, enable: bool) -> tuple[bool, str]:
+    """为命令行工具写入 / 清除用户环境变量。返回 (是否成功, 说明)。"""
+    values = env_values(host, port)
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
                             winreg.KEY_READ | winreg.KEY_WRITE) as k:
-            for name, value in keys.items():
+            for name in values:
                 if enable:
-                    winreg.SetValueEx(k, name, 0, winreg.REG_SZ, value)
+                    winreg.SetValueEx(k, name, 0, winreg.REG_SZ, values[name])
                 else:
                     try:
                         winreg.DeleteValue(k, name)
                     except FileNotFoundError:
                         pass
-        refresh()
-    except OSError:
-        pass
+    except OSError as e:
+        # 以前这里静默吞掉异常，界面永远显示成功，实际一个变量都没写进去
+        return False, f"写入用户环境变量失败：{e}"
+    refresh_env()
+    if enable:
+        return True, "用户环境变量已更新（新开的终端生效）"
+    return True, "用户环境变量已清除"
 
 
 def env_script(host: str, port: int) -> str:
-    return (
-        "@echo off\r\n"
-        "rem 在当前 CMD 窗口启用代理（仅本次会话有效）\r\n"
-        f'set HTTP_PROXY=http://{host}:{port}\r\n'
-        f'set HTTPS_PROXY=http://{host}:{port}\r\n'
-        f'set ALL_PROXY=socks5h://{host}:{port}\r\n'
-        "set NO_PROXY=localhost,127.0.0.1,::1\r\n"
-        "echo 代理已启用。\r\n"
-    )
+    lines = [
+        "@echo off",
+        "rem 在当前 CMD 窗口启用代理（仅本次会话有效）",
+    ]
+    lines += [f"set {name}={value}" for name, value in env_values(host, port).items()]
+    lines += ["echo 代理已启用。", ""]
+    return "\r\n".join(lines)
 
 
 def startup_dir() -> str:

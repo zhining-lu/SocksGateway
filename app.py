@@ -279,8 +279,8 @@ class Api:
         return {"ok": ok, "message": msg}
 
     def set_user_env(self, enable: bool):
-        sysproxy.set_user_env("127.0.0.1", int(self.cfg["listen"]["port"]), enable)
-        return {"ok": True, "message": "用户环境变量已更新（新开的终端生效）"}
+        ok, msg = sysproxy.set_user_env("127.0.0.1", int(self.cfg["listen"]["port"]), enable)
+        return {"ok": ok, "message": msg}
 
     # ---------------- 配置 ----------------
     def save_config(self, cfg: dict):
