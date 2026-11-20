@@ -32,6 +32,10 @@ class Gateway:
         self.running = False
         self.started_at: float | None = None
         self.listen = f"127.0.0.1:{cfg['listen']['port']}"
+        # 请求头读取超时：客户端连上后只发半截头就停住（slowloris / 异常中断），
+        # 没有超时的话 _read_head 会永久挂在 read()，对应 task 与 writer 一直被持有。
+        # 做成可配置仅为测试方便，生产默认 15s，覆盖正常客户端的建连+发头时间。
+        self.head_timeout = float(cfg.get("head_timeout", 15.0))
         self.stats = {"up": 0, "down": 0, "active": 0, "total": 0, "failed": 0}
         self.log: deque = deque(maxlen=200)
         self._tasks: set[asyncio.Task] = set()
@@ -133,7 +137,13 @@ class Gateway:
         self._writers.add(writer)
         entry = None
         try:
-            head, rest = await self._read_head(reader)
+            # 半开连接（只发部分请求头就停住）不能永久占用 task/writer；
+            # 超时交给下面的 TimeoutError 分支统一记失败并回 502、关闭连接。
+            try:
+                head, rest = await asyncio.wait_for(
+                    self._read_head(reader), self.head_timeout)
+            except asyncio.TimeoutError:
+                raise socks5.SocksError("请求头接收超时") from None
             if head is None:
                 return
             first, _, header_blob = head.partition(b"\r\n")
