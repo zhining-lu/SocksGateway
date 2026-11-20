@@ -277,6 +277,7 @@
       $("#tg-autostart-gw").checked = !!C.auto_start_gateway;
       $("#tg-sysproxy").checked = sysApplied;
       $("#tg-dns").checked = !!C.dns_via_proxy;
+      $("#tg-usrenv").checked = !!(C.system_proxy && C.system_proxy.write_user_env);
     } catch (err) {
       window.__sgLastError = String(err && err.stack ? err.stack : err);
       throw err;
@@ -475,8 +476,11 @@
       toast(r.message, r.ok ? "ok" : "err");
     });
     $("#tg-usrenv").addEventListener("change", async (e) => {
+      // 写入成功后后端会把这个选择存进配置，下次启动按它自动写入
       const r = await call("set_user_env", e.target.checked);
+      if (!r.ok) e.target.checked = !e.target.checked;
       toast(r.message, r.ok ? "ok" : "err");
+      if (r.ok) refreshAll(true);
     });
     ["#btn-pac", "#btn-pac2"].forEach((sel) => $(sel).addEventListener("click", async () => {
       const r = await call("export_pac");

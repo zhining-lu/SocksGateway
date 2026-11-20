@@ -138,6 +138,10 @@ class Api:
         }
 
     # ---------------- 开关 ----------------
+    def _apply_user_env(self, enable: bool) -> tuple[bool, str]:
+        """写入 / 清除命令行代理变量（主机与端口取自当前监听配置）。"""
+        return sysproxy.set_user_env("127.0.0.1", int(self.cfg["listen"]["port"]), enable)
+
     def start(self):
         try:
             self._check_port()
@@ -147,6 +151,13 @@ class Api:
             if self.cfg["system_proxy"].get("apply_on_start"):
                 self.apply_system_proxy(True)
                 msg += "，系统代理已接管"
+            # 开关记住的选择：上次开着的话，这次启动自动写入
+            if self.cfg["system_proxy"].get("write_user_env"):
+                env_ok, env_msg = self._apply_user_env(True)
+                if env_ok:
+                    msg += "，命令行代理变量已写入"
+                else:
+                    log_event(env_msg)
             return {"ok": True, "message": msg}
         except OSError as e:
             return {"ok": False, "message": f"启动失败：端口被占用或不可用（{e}）"}
@@ -162,6 +173,14 @@ class Api:
                 msg += "，系统代理已还原"
         except Exception as e:  # noqa: BLE001
             log_event(f"还原系统代理失败：{e}")
+        # 同理：环境变量还指向已关闭的端口，留着会让 git / npm 一直连不上
+        if self.cfg["system_proxy"].get("write_user_env"):
+            try:
+                env_ok, _env_msg = self._apply_user_env(False)
+                if env_ok:
+                    msg += "，命令行代理变量已清除"
+            except Exception as e:  # noqa: BLE001
+                log_event(f"清除环境变量失败：{e}")
         log_event(msg)
         return {"ok": True, "message": msg}
 
@@ -279,7 +298,13 @@ class Api:
         return {"ok": ok, "message": msg}
 
     def set_user_env(self, enable: bool):
-        ok, msg = sysproxy.set_user_env("127.0.0.1", int(self.cfg["listen"]["port"]), enable)
+        ok, msg = self._apply_user_env(enable)
+        if ok:
+            # 记住选择，下次启动由 start() 按它自动写入
+            sp = self.cfg.setdefault("system_proxy", {})
+            if sp.get("write_user_env") != enable:
+                sp["write_user_env"] = enable
+                cfgmod.save(self.cfg)
         return {"ok": ok, "message": msg}
 
     # ---------------- 配置 ----------------
@@ -635,6 +660,13 @@ def main():
             # 只还原「本程序真正接管过」的系统代理，避免误关用户原有设置
             if cfg.get("system_proxy", {}).get("restore_on_exit", True):
                 api._restore_proxy()
+            # 退出后网关不再监听，变量留着会让 CLI 一直连不上；
+            # 配置里的选择不动，下次启动仍会按它自动打开
+            if cfg.get("system_proxy", {}).get("write_user_env"):
+                try:
+                    sysproxy.set_user_env("127.0.0.1", int(cfg["listen"]["port"]), False)
+                except Exception as e:  # noqa: BLE001
+                    log_event(f"退出时清除环境变量失败：{e}")
         finally:
             try:
                 core.shutdown()

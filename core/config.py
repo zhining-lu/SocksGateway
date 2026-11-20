@@ -49,6 +49,9 @@ DEFAULT_CONFIG = {
         "apply_on_start": True,
         "restore_on_exit": True,
         "bypass_extra": True,    # 把不代理列表同步写入 Windows 例外
+        # 记住「命令行工具 → 写入用户环境变量」的开关：网关启动时写入，
+        # 停止 / 退出时清除（避免变量指向已关闭的端口）
+        "write_user_env": False,
     },
     # 上游代理服务由外部程序提供，这里只记「用哪个脚本启动它」
     "upstream_launcher": {
