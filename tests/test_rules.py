@@ -66,3 +66,65 @@ def test_pac_generation():
     assert "intra.corp" in text
     assert "PROXY 127.0.0.1:18081" in text
     assert text.count("{") == text.count("}")
+
+
+def test_domain_index_keeps_original_priority():
+    """域名走 trie 之后，仍必须遵守原始顺序：下标最小的规则胜出。"""
+    # 同一域名写了两条，取最靠前的一条
+    rs = [
+        {"type": "domain", "value": "dup.example", "action": "direct"},
+        {"type": "domain", "value": "dup.example", "action": "proxy"},
+    ]
+    assert rules.match_rule("a.dup.example", rs)[0] == "direct"
+
+    # 通配符在前、域名在后：通配符下标更小，应胜出
+    rs = [
+        {"type": "wildcard", "value": "*.example.com", "action": "direct"},
+        {"type": "domain", "value": "example.com", "action": "proxy"},
+    ]
+    assert rules.match_rule("x.example.com", rs)[0] == "direct"
+
+    # 域名在前、通配符在后：域名胜出
+    rs = [
+        {"type": "domain", "value": "example.com", "action": "proxy"},
+        {"type": "wildcard", "value": "*.example.com", "action": "direct"},
+    ]
+    assert rules.match_rule("x.example.com", rs)[0] == "proxy"
+
+
+def test_domain_suffix_and_deep_subdomain():
+    rs = [{"type": "domain", "value": "example.com", "action": "proxy"}]
+    assert rules.match_rule("example.com", rs)[0] == "proxy"
+    assert rules.match_rule("a.b.c.example.com", rs)[0] == "proxy"
+    assert rules.match_rule("www.example.com.", rs)[0] == "proxy"   # 尾点归一化
+    assert rules.match_rule("notexample.com", rs)[0] is None        # 不能当子串误判
+    assert rules.match_rule("example.com.cn", rs)[0] is None
+
+
+def test_disabled_and_blank_rules_are_skipped():
+    rs = [
+        {"type": "domain", "value": "off.example", "action": "proxy", "enabled": False},
+        {"type": "domain", "value": "   ", "action": "proxy"},
+        {"type": "domain", "value": "on.example", "action": "direct"},
+    ]
+    assert rules.match_rule("www.off.example", rs)[0] is None
+    assert rules.match_rule("www.on.example", rs)[0] == "direct"
+
+
+def test_wildcard_without_glob_char_behaves_like_domain():
+    rs = [{"type": "wildcard", "value": "corp.internal", "action": "direct"}]
+    assert rules.match_rule("corp.internal", rs)[0] == "direct"
+    assert rules.match_rule("a.corp.internal", rs)[0] == "direct"
+    assert rules.match_rule("xcorp.internal", rs)[0] is None
+
+
+def test_index_rebuilds_when_rule_list_is_replaced():
+    """列表整体替换后必须重建索引，不能命中上一个列表的缓存。"""
+    first = [{"type": "domain", "value": "a.example", "action": "proxy"}]
+    assert rules.match_rule("a.example", first)[0] == "proxy"
+
+    second = [{"type": "domain", "value": "a.example", "action": "direct"}]
+    assert rules.match_rule("a.example", second)[0] == "direct"
+
+    # 旧列表的结果不应被新列表污染
+    assert rules.match_rule("a.example", first)[0] == "proxy"
