@@ -165,7 +165,11 @@ class Api:
             return {"ok": False, "message": f"启动失败：{e}"}
 
     def stop(self):
-        self.core.stop()
+        # 即使停止网关超时也要往下走：系统代理不还原、变量不清理 = 用户直接断网
+        try:
+            self.core.stop()
+        except Exception as e:  # noqa: BLE001
+            log_event(f"停止网关超时或失败：{e}")
         msg = "网关已停止"
         # 网关停了还留着系统代理 = 直接断网，这里必须一并还原
         try:

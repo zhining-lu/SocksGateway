@@ -47,22 +47,42 @@ class Gateway:
 
     async def stop(self) -> None:
         self.running = False
-        if self.server:
-            self.server.close()
-            try:
-                await self.server.wait_closed()
-            except Exception:
-                pass
-            self.server = None
-        for w in list(self._writers):
+        server, self.server = self.server, None
+
+        # 1) 先停止接受新连接
+        if server is not None:
+            server.close()
+
+        # 2) 再断开已建立的连接。顺序不能反：Python 3.12+ 的 wait_closed()
+        #    会等所有连接处理完才返回，而连接恰恰要靠这一步关闭才会结束，
+        #    先 await 就会一直挂到调用方超时（有 keep-alive 连接时必现）。
+        writers = list(self._writers)
+        self._writers.clear()
+        for w in writers:
             try:
                 w.close()
             except Exception:
                 pass
-        self._writers.clear()
-        for t in list(self._tasks):
-            t.cancel()
+
+        # 3) 取消在途请求
+        tasks = [t for t in self._tasks if not t.done()]
         self._tasks.clear()
+        for t in tasks:
+            t.cancel()
+
+        # 4) 兜底等待：对端不响应 / 半关闭时不至于无限拖住
+        if server is not None:
+            try:
+                await asyncio.wait_for(server.wait_closed(), 3.0)
+            except Exception:
+                pass
+        if tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True), 3.0)
+            except Exception:
+                pass
+
         self.stats["active"] = 0
 
     # ---------- 路由判定 ----------
