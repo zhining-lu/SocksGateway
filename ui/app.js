@@ -25,6 +25,13 @@
 
   const TYPE_LABEL = { domain: "域名", wildcard: "域名通配符", regex: "正则表达式" };
   const ACTION_LABEL = { proxy: "通过代理", direct: "直接连接" };
+  // 输入框提示按类型给不同示例，避免三种规则共用同一个 *.example.com
+  const TYPE_PLACEHOLDER = {
+    domain: "例如 example.com",
+    wildcard: "例如 *.example.com",
+    regex: "例如 ^ads?\\d+\\.",
+  };
+  const placeholderOf = (type) => TYPE_PLACEHOLDER[type] || TYPE_PLACEHOLDER.domain;
 
   /* ---------------- 工具 ---------------- */
   function fmtBytes(n) {
@@ -122,7 +129,7 @@
                 `<option value="${v}"${r.type === v ? " selected" : ""}>${l}</option>`).join("")}
             </select>
           </td>
-          <td><input type="text" data-act="value" value="${esc(r.value)}" placeholder="例如 *.example.com" spellcheck="false"></td>
+          <td><input type="text" data-act="value" value="${esc(r.value)}" placeholder="${placeholderOf(r.type)}" spellcheck="false"></td>
           <td>
             <select data-act="action">
               ${Object.entries(ACTION_LABEL).map(([v, l]) =>
@@ -416,7 +423,13 @@
       const act = e.target.dataset.act;
       if (!act) return;
       C.rules[i][act] = e.target.value.trim();
-      if (act === "value") renderRules();
+      if (act === "value") {
+        renderRules();
+      } else if (act === "type") {
+        // 只换提示，不整表重绘——重绘会把正在操作的 select 一起换掉
+        const input = tr.querySelector('input[data-act="value"]');
+        if (input) input.placeholder = placeholderOf(C.rules[i].type);
+      }
       saveCfg(true);
     });
 
