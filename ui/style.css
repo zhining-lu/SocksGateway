@@ -314,6 +314,8 @@ input[type="checkbox"].plain, .checkbox-line input { accent-color: var(--brand);
 #page-requests .card-head { flex: 0 0 auto; }
 #page-requests .log-wrap { flex: 1; min-height: 0; height: auto; max-height: none; }
 #page-requests .log-wrap thead th { position: sticky; top: 0; z-index: 1; }
+/* 最近请求：正文可选中复制（全局是 user-select:none） */
+.log-wrap, .log-wrap th, .log-wrap td { user-select: text; }
 .tag { display: inline-block; padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 600; }
 .tag.proxy { background: var(--brand-soft); color: var(--brand-dark); }
 .tag.direct { background: #f0f2f6; color: #556070; }

@@ -13,6 +13,7 @@
   let saveTimer = null;
   let tick = 0;
   let lastLogKey = "";
+  let lastLog = [];      // 最近一次渲染的请求列表，供复制使用
 
   const PAGE_META = {
     overview: ["概览", "本地 SOCKS5h 网关运行状态与实时流量"],
@@ -51,6 +52,42 @@
     return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
+  /* ---------------- 复制（最近请求） ---------------- */
+  function fallbackCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:-1000px;left:-1000px;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } finally { ta.remove(); }
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    }
+    fallbackCopy(text);
+    return Promise.resolve();
+  }
+
+  const LOG_COLUMNS = ["时间", "方法", "目标", "路由", "状态", "上传", "下载", "耗时", "说明"];
+
+  // 一条记录压成一行：制表符分隔，粘进 Excel 直接成列；换行/制表符先压平
+  function logLine(e) {
+    return [
+      e.time, e.method, `${e.host}:${e.port}`,
+      e.action === "direct" ? "直连" : "代理",
+      e.status, fmtBytes(e.up), fmtBytes(e.down),
+      e.ms ? e.ms + "ms" : "",
+      e.error || e.why || "",
+    ].map((v) => String(v == null ? "" : v).replace(/[\t\r\n]+/g, " ")).join("\t");
+  }
+
+  function logTableText(entries) {
+    return [LOG_COLUMNS.join("\t")].concat(entries.map(logLine)).join("\r\n");
+  }
+
   let toastTimer = null;
   function toast(msg, kind) {
     const el = $("#toast");
@@ -235,6 +272,7 @@
 
   function renderLog(log) {
     const body = $("#log-body");
+    lastLog = log || [];
     const key = (log && log.length ? `${log.length}:${log[0].time}:${log[0].host}:${log[0].status}` : "0");
     if (key === lastLogKey) return;
     lastLogKey = key;
@@ -468,6 +506,14 @@
     });
   }
 
+  function bindRequests() {
+    $("#btn-log-copy").addEventListener("click", async () => {
+      if (!lastLog.length) { toast("暂无请求可复制", "err"); return; }
+      await copyText(logTableText(lastLog));
+      toast(`已复制 ${lastLog.length} 条请求`, "ok");
+    });
+  }
+
   function bindSystem() {
     $("#btn-sys-on").addEventListener("click", async () => {
       if (!running) { toast("请先启动网关", "err"); return; }
@@ -562,6 +608,7 @@
   /* ---------------- 启动 ---------------- */
   function boot() {
     bindNav(); bindServer(); bindRules(); bindRuleList(); bindSystem(); bindToggles(); bindTests();
+    bindRequests();
     if (location.hash.length > 1) showPage(location.hash.slice(1));
     refreshAll(false).then(async () => {
       if (C && C.auto_start_gateway && !running) {
