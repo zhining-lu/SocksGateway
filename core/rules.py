@@ -127,6 +127,20 @@ class _DomainTrie:
         return best
 
 
+def _as_network(value: str):
+    """把 CIDR 字符串转成网段，不像网段就返回 None。
+
+    regex 类型里常见 `/^https?:\\/\\/.../` 这种自带斜杠的正则，不能因为
+    “含 /” 就直接按网段解析——解析失败后若丢弃整条规则，正则规则会静默消失。
+    """
+    if "/" not in value:
+        return None
+    try:
+        return ipaddress.ip_network(value, strict=False)
+    except ValueError:
+        return None
+
+
 def _in_network(host: str, net) -> bool:
     try:
         return ipaddress.ip_address(host) in net
@@ -168,18 +182,15 @@ def _build_index(rules: list[dict]) -> _RuleIndex:
                 # 不含通配符时与原逻辑一致：等价于域名后缀匹配
                 idx.trie.add(low, i)
         elif rtype in ("regex", "正则"):
-            if "/" in value:
-                try:
-                    net = ipaddress.ip_network(value, strict=False)
-                except ValueError:
-                    continue
+            net = _as_network(value)
+            if net is not None:
                 idx.linear.append((i, "cidr", net, action, rule))
-            else:
-                try:
-                    rx = re.compile(value, re.I)
-                except re.error:
-                    continue
-                idx.linear.append((i, "regex", rx, action, rule))
+                continue
+            try:
+                rx = re.compile(value, re.I)
+            except re.error:
+                continue
+            idx.linear.append((i, "regex", rx, action, rule))
 
     idx.linear.sort(key=lambda e: e[0])
     return idx
@@ -252,6 +263,23 @@ def decode_gfwlist(text: str) -> str:
     return text
 
 
+_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
+
+
+def _strip_scheme(pattern: str) -> str:
+    """剥掉 `http://` 这类协议头。"""
+    return _SCHEME_RE.sub("", pattern.strip(), count=1)
+
+
+def _host_of(pattern: str) -> str:
+    """从 AutoProxy 片段里取出主机名。
+
+    单竖线规则常写成完整 URL（`|http://img.dlsite.jp/`），不先剥协议头的话
+    `split("/")[0]` 取到的会是 `http:`，真实域名反而丢了。
+    """
+    return _strip_scheme(pattern).split("^", 1)[0].split("/", 1)[0].strip()
+
+
 def parse_rule_list(text: str, fmt: str = "gfwlist") -> list[dict]:
     """把规则列表文本转成规则数组。"""
     body = decode_gfwlist(text) if fmt != "plain" else text
@@ -265,11 +293,11 @@ def parse_rule_list(text: str, fmt: str = "gfwlist") -> list[dict]:
             action = "direct"
             line = line[2:]
         if line.startswith("||"):
-            domain = line[2:].split("^")[0].split("/")[0].strip("*.")
+            domain = _host_of(line[2:]).strip("*.")
             if domain:
                 rules.append({"type": "domain", "value": domain, "action": action})
         elif line.startswith("|") or line.startswith("."):
-            domain = line.lstrip("|.").split("^")[0].split("/")[0]
+            domain = _host_of(line.lstrip("|.")).strip("*.")
             if domain:
                 rules.append({"type": "domain", "value": domain, "action": action})
         elif line.startswith("/") and line.endswith("/") and len(line) > 2:
@@ -279,3 +307,15 @@ def parse_rule_list(text: str, fmt: str = "gfwlist") -> list[dict]:
             if domain:
                 rules.append({"type": "domain", "value": domain, "action": action})
     return rules
+
+
+def merge_parsed(parsed: list[dict]) -> list[dict]:
+    """整理解析结果：direct（`@@` 例外）在前，proxy 在后。
+
+    gfwlist 的 `@@` 是「例外优先」语义，而 match_rule 是 first-match-wins：
+    `||gov.tw` 与 `@@||www.gov.tw` 并存时，白名单必须排在屏蔽规则前面才生效。
+    """
+    if not parsed:
+        return []
+    return ([r for r in parsed if r.get("action") == "direct"] +
+            [r for r in parsed if r.get("action") != "direct"])

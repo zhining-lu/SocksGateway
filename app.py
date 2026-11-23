@@ -383,9 +383,9 @@ class Api:
         parsed = rulemod.parse_rule_list(text, rl.get("format", "gfwlist"))
         if not parsed:
             return {"ok": False, "message": "规则列表为空或格式无法识别"}
-        keep_proxy = [r for r in parsed if r["action"] == "proxy"]
-        keep_direct = [r for r in parsed if r["action"] == "direct"]
-        merged = keep_proxy + keep_direct
+        # direct（@@ 例外）排在前面：match_rule 是 first-match-wins，
+        # 白名单落在屏蔽规则后面就永远轮不到
+        merged = rulemod.merge_parsed(parsed)
         # 整体替换而不是就地改字段：后台自动更新与 UI 线程并发读时不会看到半成品
         updated = dict(rl)
         updated["rules"] = merged
