@@ -16,6 +16,10 @@ from . import rules as rulemod
 from . import socks5
 
 MAX_HEAD = 64 * 1024
+
+# 自检请求标记：主页「检测网关出网」用它强制走上游，跳过规则判定。
+# 只在明文 HTTP 代理路径上生效，且只认本机来源（见 _force_proxy_requested）。
+FORCE_PROXY_HEADER = "x-socksgateway-force-proxy"
 # 转发块大小。每块要走一次事件循环（读、写、drain），实测块越大往返次数越少、
 # 吞吐越高；128 KB 之后收益基本饱和（再大只是多占内存），故定在这里。
 CHUNK = 128 * 1024
@@ -93,7 +97,9 @@ class Gateway:
         self.stats["active"] = 0
 
     # ---------- 路由判定 ----------
-    def _route(self, host: str) -> tuple[str, str]:
+    def _route(self, host: str, force_proxy: bool = False) -> tuple[str, str]:
+        if force_proxy:
+            return "proxy", "网关自检"
         cfg = self.cfg
         if rulemod.match_bypass(host, cfg.get("bypass") or []):
             return "direct", "不代理列表"
@@ -107,6 +113,25 @@ class Gateway:
             if action2:
                 return action2, "规则列表"
         return cfg.get("default_action", "proxy"), "默认"
+
+    # ---------- 自检请求：强制走上游 ----------
+    @staticmethod
+    def _is_local_client(writer) -> bool:
+        try:
+            peer = writer.get_extra_info("peername") or ("", 0)
+            return peer[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+        except Exception:
+            return False
+
+    def _force_proxy_requested(self, writer, header_blob: bytes) -> bool:
+        """本机发来的自检请求：强制走上游，不再参与规则判定。
+
+        只认环回对端。网关默认监听 127.0.0.1，但仍校验一次——万一端口被
+        转发出去，外部请求不能靠这个头绕过规则。
+        """
+        if FORCE_PROXY_HEADER.encode() not in header_blob.lower():
+            return False
+        return self._is_local_client(writer)
 
     # ---------- 连接建立 ----------
     async def _dial(self, host: str, port: int, action: str):
@@ -212,7 +237,7 @@ class Gateway:
         path = parts.path or "/"
         if parts.query:
             path += "?" + parts.query
-        action, why = self._route(host)
+        action, why = self._route(host, force_proxy=self._force_proxy_requested(writer, header_blob))
         entry = self._log(method=method, host=host, port=port, action=action, why=why)
         up_r, up_w = await self._dial(host, port, action)
 
@@ -228,7 +253,8 @@ class Gateway:
 
     @staticmethod
     def _rewrite_headers(header_blob: bytes, host: str, port: int) -> str:
-        drop = {"proxy-connection", "proxy-authorization", "connection", "keep-alive"}
+        drop = {"proxy-connection", "proxy-authorization", "connection", "keep-alive",
+                FORCE_PROXY_HEADER}
         lines = []
         have_host = False
         for raw in header_blob.split(b"\r\n"):

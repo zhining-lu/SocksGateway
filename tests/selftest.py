@@ -96,11 +96,13 @@ class Origin(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def http_via_gateway(path: str, host: str = "127.0.0.1") -> bytes:
+def http_via_gateway(path: str, host: str = "127.0.0.1",
+                     extra_headers: dict | None = None) -> bytes:
     """走网关的普通 HTTP 代理请求（绝对 URI 形式）"""
     url = f"http://{host}:{ORIGIN_PORT}{path}"
+    extra = "".join(f"{k}: {v}\r\n" for k, v in (extra_headers or {}).items())
     s = socket.create_connection(("127.0.0.1", GW_PORT), 6)
-    s.sendall(f"GET {url} HTTP/1.1\r\nHost: {host}:{ORIGIN_PORT}\r\n"
+    s.sendall(f"GET {url} HTTP/1.1\r\nHost: {host}:{ORIGIN_PORT}\r\n{extra}"
               f"Connection: close\r\n\r\n".encode())
     data = b""
     while True:
@@ -193,6 +195,21 @@ def main() -> int:
     seen.clear()
     body = connect_via_gateway("localhost", ORIGIN_PORT, "/wild")
     ok &= check("通配符规则不误伤本域", b"hello-from-origin /wild" in body and bool(seen), f"seen={seen}")
+
+    # 4.1) 主页「检测网关出网」：带自检头时强制走上游，规则与默认动作都不参与
+    cfg["rules"] = [{"type": "domain", "value": "127.0.0.1", "action": "direct", "enabled": True}]
+    cfg["default_action"] = "direct"
+    seen.clear()
+    body = http_via_gateway("/selftest", extra_headers={gwmod.FORCE_PROXY_HEADER: "1"})
+    ok &= check("自检请求强制走上游（规则 direct 无效）",
+                b"hello-from-origin /selftest" in body
+                and seen == [("ipv4", "127.0.0.1", ORIGIN_PORT)], f"seen={seen}")
+    seen.clear()
+    body = http_via_gateway("/noselftest")
+    ok &= check("不带自检头仍按规则直连",
+                b"hello-from-origin /noselftest" in body and not seen, f"seen={seen}")
+    cfg["default_action"] = "proxy"
+    cfg["rules"] = []
 
     # 5) 不代理列表
     cfg["rules"] = []

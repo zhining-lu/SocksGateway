@@ -361,11 +361,14 @@ class Api:
         addr = f"127.0.0.1:{self.cfg['listen']['port']}"
         opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({"http": f"http://{addr}", "https": f"http://{addr}"}))
+        # 带上自检标记：网关侧强制走上游，不受规则列表 / 点击直连影响，
+        # 这样按钮验的是「本机 → 网关 → 上游 → 目标」这条完整链路
+        req = urllib.request.Request(url, headers={gwmod.FORCE_PROXY_HEADER: "1"})
         t0 = time.time()
         try:
-            with opener.open(url, timeout=10) as resp:
+            with opener.open(req, timeout=10) as resp:
                 resp.read(2048)
-            return {"ok": True, "message": f"经网关访问成功（{resp.status}），{int((time.time() - t0) * 1000)} ms"}
+            return {"ok": True, "message": f"经网关走上游访问成功（{resp.status}），{int((time.time() - t0) * 1000)} ms"}
         except urllib.error.HTTPError as e:
             return {"ok": True, "message": f"经网关访问成功（HTTP {e.code}）"}
         except Exception as e:  # noqa: BLE001
