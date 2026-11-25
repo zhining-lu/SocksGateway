@@ -38,7 +38,7 @@ DEFAULT_CONFIG = {
     "rule_list": {
         "url": "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt",
         "format": "gfwlist",     # gfwlist | autoproxy(同 gfwlist) | 纯文本域名
-        "enabled": False,
+        "enabled": True,         # 默认启用：首次启动即拉取，之后按间隔自动更新
         "update_interval_hours": 24,   # 自动更新间隔（小时），下限 1
         "last_update": None,
         "count": 0,
