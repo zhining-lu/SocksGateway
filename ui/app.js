@@ -198,12 +198,12 @@
     return `${pad(next.getMonth() + 1)}-${pad(next.getDate())} ${pad(next.getHours())}:${pad(next.getMinutes())}`;
   }
 
-  function renderRuleList() {
+  // 只刷新规则列表的只读展示字段。
+  // 后台自动更新会改 C.rule_list，但轮询里若整块 renderRuleList() 重渲染，
+  // 会覆盖用户正在输入的网址/格式单选，也会把几千行预览重画一遍，故拆出来单独刷。
+  function renderRuleMeta() {
     const rl = C.rule_list || {};
     const rules = rl.rules || [];
-    $("#f-rl-enabled").checked = !!rl.enabled;
-    $("#f-rl-url").value = rl.url || "";
-    $$('input[name="rlfmt"]').forEach((el) => { el.checked = (el.value === (rl.format || "gfwlist")); });
     $("#rl-count").textContent = String(rl.count || rules.length || 0);
     $("#rl-time").textContent = rl.last_update || "尚未更新";
     $("#rl-next").textContent = fmtNextUpdate(rl);
@@ -211,6 +211,15 @@
       ? rules.slice(0, 3).map((r) => r.value).join("、") + (rules.length > 3 ? " …" : "")
       : "—";
     $("#rl-preview-count").textContent = rules.length ? `共 ${rules.length} 条` : "—";
+  }
+
+  function renderRuleList() {
+    const rl = C.rule_list || {};
+    const rules = rl.rules || [];
+    $("#f-rl-enabled").checked = !!rl.enabled;
+    $("#f-rl-url").value = rl.url || "";
+    $$('input[name="rlfmt"]').forEach((el) => { el.checked = (el.value === (rl.format || "gfwlist")); });
+    renderRuleMeta();
     const shown = rules.length > PREVIEW_MAX ? rules.slice(0, PREVIEW_MAX) : rules;
     $("#rl-preview").textContent = rules.length
       ? shown.map((r) => `${r.action === "direct" ? "@@ " : ""}${r.value}`).join("\n")
@@ -351,6 +360,7 @@
         if (full && full.ok) {
           C = full.config;
           renderSystem(full.system_proxy);
+          renderRuleMeta();   // 规则列表由后台线程自动更新，这里补刷「最近更新/下次自动更新」
         }
       }
       // 输出面板展开时跟着脚本持续刷新
